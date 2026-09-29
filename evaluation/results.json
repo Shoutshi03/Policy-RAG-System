@@ -1,0 +1,38 @@
+{
+  "recall_at_3": 1.0,
+  "mrr_at_3": 0.867,
+  "unsupported_abstention_accuracy": 1.0,
+  "test_cases": 6,
+  "note": "Deterministic local retrieval only; no LLM calls. Synthetic demonstration corpus.",
+  "details": [
+    {
+      "id": "resilience_fr_1",
+      "hit_at_3": true,
+      "rank": 1
+    },
+    {
+      "id": "resilience_fr_2",
+      "hit_at_3": true,
+      "rank": 1
+    },
+    {
+      "id": "employment_en_1",
+      "hit_at_3": true,
+      "rank": 3
+    },
+    {
+      "id": "employment_ar_1",
+      "hit_at_3": true,
+      "rank": 1
+    },
+    {
+      "id": "social_fr_1",
+      "hit_at_3": true,
+      "rank": 1
+    },
+    {
+      "id": "abstention_1",
+      "abstention_correct": true
+    }
+  ]
+}

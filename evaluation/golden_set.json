@@ -1,0 +1,8 @@
+[
+  {"id":"resilience_fr_1","language":"fr","query":"Quelle cible de réduction est proposée pour les interruptions de services ?","expected_document":"DEMO · Résilience climatique","expected_page":2,"answerable":true},
+  {"id":"resilience_fr_2","language":"fr","query":"Quels indicateurs et risques concernent l’alerte précoce ?","expected_document":"DEMO · Résilience climatique","expected_page":9,"answerable":true},
+  {"id":"employment_en_1","language":"en","query":"What safeguards are recommended for youth employment apprenticeships?","expected_document":"DEMO · Emploi des jeunes","expected_page":6,"answerable":true},
+  {"id":"employment_ar_1","language":"ar","query":"ما التوصيات الخاصة بالتدريب والعمل اللائق للشباب؟","expected_document":"DEMO · Emploi des jeunes","expected_page":9,"answerable":true},
+  {"id":"social_fr_1","language":"fr","query":"Quels sont les risques des transferts d’urgence et que permettent les guichets de proximité ?","expected_document":"DEMO · Protection sociale","expected_page":10,"answerable":true},
+  {"id":"abstention_1","language":"en","query":"What is the exact make and model of a spacecraft chair?","expected_document":null,"expected_page":null,"answerable":false}
+]
