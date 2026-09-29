@@ -1,125 +1,202 @@
 # PolicyRAG & Insight Assistant
 
-Prototype Streamlit pour interroger des rapports de politique publique en français, en anglais et en arabe. Il ingère des PDF, extrait le texte page par page, applique l’OCR Tesseract aux pages scannées si nécessaire, indexe les passages avec leurs références et génère des réponses à partir des passages retrouvés.
+A Streamlit prototype designed to query and analyze public policy reports in French, English, and Arabic. It ingests PDFs, extracts text page-by-page, applies fallback Tesseract OCR to scanned pages when necessary, indexes passages with precise metadata, and generates strictly grounded answers from retrieved context.
 
-> Les trois rapports préchargés sont **entièrement fictifs** et servent uniquement aux tests de l’interface. Ils ne sont pas des publications de l’ONU/du PNUD ; leurs chiffres ne doivent pas être réutilisés comme résultats réels.
+> The three preloaded reports are **entirely fictional** and provided solely for testing the user interface. They are not official UN/UNDP publications; their figures must not be cited as real-world results.
 
-## Fonctions livrées
+---
 
-- Import de PDF multiples, contrôle de format/signature, taille (20 Mo), nombre de pages (500), déduplication SHA-256 et nom sécurisé.
-- Extraction paginée via PyMuPDF, nettoyage et repérage simple des titres/sections.
-- OCR de secours avec Tesseract (français/anglais ou arabe/anglais dans l’interface).
-- Chunking conservant document, page, section, langue et identifiant de passage.
-- Recherche hybride : BM25 + vecteurs de caractères multilingues par feature hashing ; seuil de confiance et abstention explicite.
-- Réécriture FR/EN/AR et réponse fondée sur les passages par **Qwen3.8 27B (free)** via l’API OpenRouter compatible OpenAI.
-- Modes : questions/réponses, résumé, explication, comparaison, extraction de recommandations/risques/objectifs/indicateurs/parties prenantes, traduction et insights.
-- Citations [S1]… limitées aux sources réellement retrouvées ; panneau avec document, page, section et extrait.
-- Conversation courte conservée dans l’état de la session Streamlit.
-- Adaptateur Qdrant distant facultatif, séparé par UUID de workspace. Sans QDRANT_URL, le démonstrateur reste autonome.
-- API REST FastAPI/Pydantic complémentaire, tests pytest et jeu d’évaluation trilingue ; Dockerfile et Docker Compose.
+## Key Features
+
+- **Multi-PDF Ingestion**: Signature/format validation, file size checks (20 MB), page limits (500 pages), SHA-256 deduplication, and filename sanitization.
+- **Paged Text Extraction**: PyMuPDF extraction with text cleaning and heuristic section/heading detection.
+- **Fallback OCR**: Integrated Tesseract OCR (French, English, Arabic) for scanned documents or image-based pages.
+- **Metadata-Preserving Chunking**: Retains document ID, filename, page number, section, language, and unique chunk identifier.
+- **Hybrid Retrieval**: Combines BM25 lexical ranking and multilingual character n-gram feature hashing with confidence thresholds and explicit abstention.
+- **Multilingual LLM Generation**: Query expansion, translation, and strictly grounded answers in FR/EN/AR via OpenRouter (default: `google/gemini-2.0-flash-exp:free` / `qwen/qwen3.8-27b:free` / OpenAI-compatible API).
+- **Specialized Analysis Modes**: Question Answering (QA), Executive Summary, Deep Explanation, Cross-Report Comparison, Structured Extraction (Recommendations, Risks, Objectives, Indicators, Stakeholders), Translation, and Policy Insights.
+- **Verifiable Citations**: `[S1]`, `[S2]` source attribution linked to retrieved passages, displaying document name, page number, section header, and excerpt.
+- **Session State Memory**: Multi-turn conversational context preserved across user queries.
+- **Optional Qdrant Integration**: Remote vector database adapter partitioned by workspace UUID. When `QDRANT_URL` is omitted, the system runs fully self-contained in local memory.
+- **FastAPI REST Service & Testing**: Parallel FastAPI backend, Pytest test suite, trilingual deterministic evaluation harness, Dockerfile, and Docker Compose setup.
+
+---
 
 ## Architecture
 
-```text
-PDF → validation + SHA-256 → PyMuPDF → OCR si nécessaire → nettoyage/sections
-    → chunks paginés → BM25 + vecteurs n-grammes (Qdrant facultatif)
-    → reranking → contexte limité → Qwen via OpenRouter → citations filtrées / abstention
+```mermaid
+flowchart TD
+    subgraph Ingestion ["1. Ingestion & Preprocessing"]
+        PDF["PDF Upload / Reports"] --> VAL["Validation & SHA-256 Hash"]
+        VAL --> PYMU["PyMuPDF Text Extraction"]
+        PYMU --> OCR_DEC{"Text Layer Empty?"}
+        OCR_DEC -- Yes --> TESS["Tesseract OCR (FR / EN / AR)"]
+        OCR_DEC -- No --> CLEAN["Text Normalization & Section Detection"]
+        TESS --> CLEAN
+        CLEAN --> CHUNK["Paged Chunking + Metadata Tagging"]
+    end
+
+    subgraph Storage ["2. Hybrid Indexing & Storage"]
+        CHUNK --> BM25["In-Memory BM25 Index"]
+        CHUNK --> HASH["Multilingual Feature Hash Vectors"]
+        CHUNK -.->|Optional| QDRANT[("Qdrant Vector DB (UUID-Isolated)")]
+    end
+
+    subgraph Retrieval ["3. Retrieval & Ranking"]
+        USER_Q["User Query (FR / EN / AR)"] --> EXPAND["Query Expansion & Multi-term Variants"]
+        EXPAND --> BM25_SEARCH["BM25 Lexical Search"]
+        EXPAND --> VEC_SEARCH["Vector / N-Gram Cosine Search"]
+        BM25_SEARCH --> RRF["Reciprocal Rank Fusion & Reranking"]
+        VEC_SEARCH --> RRF
+        RRF --> THRESHOLD{"Confidence >= Threshold?"}
+        THRESHOLD -- No --> ABSTAIN["Explicit Abstention Message"]
+        THRESHOLD -- Yes --> TOPK["Top-K Grounded Passages"]
+    end
+
+    subgraph Generation ["4. Generation & Attribution"]
+        TOPK --> PROMPT["Context Assembly + System Prompt"]
+        PROMPT --> LLM["LLM via OpenRouter API (Gemini / Qwen / Llama)"]
+        LLM --> POST["Citation Validation & Source Linking"]
+        POST --> UI["Streamlit UI / FastAPI Response ([S1], [S2] Citations)"]
+        ABSTAIN --> UI
+    end
 ```
 
-La recherche locale utilise des vecteurs de caractères par feature hashing pour garder le projet léger et testable. **Ce ne sont pas des embeddings neuronaux BGE-M3** ; pour une instance de production exigeant une recherche sémantique, remplacer l’adaptateur vectoriel par BGE-M3 ou multilingual-e5 et évaluer sur des rapports représentatifs.
+> **Note on Local Vector Search**: Local retrieval utilizes character n-gram feature hashing to keep the project lightweight, portable, and dependency-free. These are **not neural dense embeddings** (such as BGE-M3 or multilingual-e5). For a high-scale production deployment requiring dense semantic embeddings, connect the vector adapter to BGE-M3/e5 with Qdrant.
 
-## Démarrage rapide
+---
 
-### Prérequis
+## Quickstart
 
-- Python 3.11+.
-- Tesseract et ses données linguistiques français, anglais et arabe pour l’OCR.
-- Une clé OpenRouter configurée côté serveur dans le fichier caché `.env` (ou dans les variables de l’hébergeur) pour activer la réécriture/génération Qwen.
+### Prerequisites
 
-### Installation Ubuntu/Linux
+- **Python 3.11+**
+- **Tesseract OCR** with language packs for French (`fra`), English (`eng`), and Arabic (`ara`).
+- **OpenRouter API Key** configured in your `.env` file (or deployment platform secrets) for LLM-powered generation.
+
+### Linux / Ubuntu Installation
 
 ```bash
+# 1. Install system dependencies & Tesseract OCR
 sudo apt-get update
 sudo apt-get install -y tesseract-ocr tesseract-ocr-eng tesseract-ocr-fra tesseract-ocr-ara
+
+# 2. Clone repository & set up Python virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
+
+# 3. Install Python dependencies
 pip install -r requirements.txt
+
+# 4. Configure environment variables
 cp env.template .env
 ```
 
-Renseigner `OPENROUTER_API_KEY` dans `.env`. Ce fichier est caché et ignoré par Git ; il est lu côté serveur au démarrage. **Aucun champ de clé API n’existe dans l’interface Streamlit.** Ne jamais committer une clé ni la partager dans un ticket ou une conversation. Pour un hébergement, utiliser son gestionnaire de secrets et injecter la variable `OPENROUTER_API_KEY` dans le processus.
+Edit your `.env` file to set `OPENROUTER_API_KEY`. The `.env` file is excluded from version control and read exclusively server-side. **No API key is entered via the Streamlit interface.**
 
-### Clé OpenRouter et quota gratuit
+### OpenRouter API Key & Free Tier
 
-1. Créer une clé sur [OpenRouter Keys](https://openrouter.ai/keys).
-2. Le modèle sélectionné par défaut est `qwen/qwen3.8-27b:free`.
-3. Selon la FAQ OpenRouter consultée le 27 septembre 2026, les modèles gratuits ont une limite indicative de **50 requêtes/jour au total** sans crédits achetés ; les comptes ayant acheté au moins 10 USD de crédits peuvent relever la limite gratuite indiquée à 1 000/jour. Cette offre peut changer. Les limites par minute et la disponibilité peuvent aussi varier ; confirmer sur la [FAQ OpenRouter](https://openrouter.ai/docs/faq).
-4. Le catalogue public OpenRouter consulté à cette date affiche 0 $ en entrée et en sortie pour le variant `:free`. Cela ne garantit pas une disponibilité permanente ou un quota illimité.
+1. Generate an API key at [OpenRouter Keys](https://openrouter.ai/keys).
+2. The default model is configured to `google/gemini-2.0-flash-exp:free` (or `qwen/qwen3.8-27b:free`).
+3. Free models on OpenRouter offer a baseline tier (subject to OpenRouter's rate limits and availability policies; see [OpenRouter FAQ](https://openrouter.ai/docs/faq)).
+4. Without an API key, the system remains functional for **local hybrid retrieval, citation lookup, and extractive answers**.
 
-La clé reste côté serveur et n’est jamais exposée dans l’interface ni dans le dépôt source ; `.env` est exclu du contrôle de version et de l’archive livrée. Pour des documents confidentiels, exécuter l’application dans un environnement contrôlé et vérifier les règles de traitement du fournisseur avant d’envoyer des extraits. Sans clé, le retrieval, les citations et les réponses extractives restent disponibles.
+---
 
-### Lancer Streamlit
+### Running the Streamlit Application
 
 ```bash
 streamlit run app.py --server.address 0.0.0.0 --server.port 8501
 ```
 
-Ouvrir `http://localhost:8501`.
+Access the interface at `http://localhost:8501`.
 
-### API REST FastAPI
+---
 
-Dans un deuxième terminal :
+### Running the FastAPI REST API
+
+In a separate terminal:
 
 ```bash
 uvicorn api:app --host 127.0.0.1 --port 8000
 ```
 
-Documentation interactive : `http://127.0.0.1:8000/docs`. Endpoints livrés : `GET /health`, `POST /api/workspaces`, `GET/POST /api/workspaces/{id}/documents`, `DELETE /api/workspaces/{id}/documents/{document_id}` et `POST /api/ask`. Pour ce prototype, l’UUID aléatoire d’espace sert de jeton de capacité ; ajouter authentification, autorisation, limitation de débit, audit et règles d’expiration avant toute publication de l’API.
+- **Interactive API Documentation (Swagger)**: `http://127.0.0.1:8000/docs`
+- **Available Endpoints**:
+  - `GET /health` — Health check
+  - `POST /api/workspaces` — Initialize an isolated workspace
+  - `GET /api/workspaces/{id}/documents` — List indexed documents
+  - `POST /api/workspaces/{id}/documents` — Upload and index a PDF
+  - `DELETE /api/workspaces/{id}/documents/{document_id}` — Delete a document
+  - `POST /api/ask` — Query the RAG engine
 
-## Tests et évaluation
+---
+
+## Testing and Evaluation
 
 ```bash
+# Run unit & integration test suite
 pytest -q
+
+# Run deterministic benchmark evaluation
 python -m evaluation.evaluate
 ```
 
-Le benchmark est déterministe et n’appelle aucun LLM. Il mesure Recall@3, MRR@3 et l’abstention sur un corpus synthétique. C’est un contrôle de câblage, pas une validation sur des politiques publiques réelles.
+The benchmark is fully deterministic and does not call external LLMs. It evaluates **Recall@3**, **MRR@3**, and **Abstention Accuracy** across a synthetic trilingual evaluation corpus.
 
-## Qdrant facultatif
+---
 
-Les documents importés restent par défaut en mémoire dans la session Streamlit. Pour tester l’adaptateur distant, définir `QDRANT_URL`, et `QDRANT_API_KEY` si le cluster l’exige. Les vecteurs et extraits envoyés à Qdrant sont filtrés par UUID de workspace. Sans URL, ou si Qdrant ne répond pas, l’application conserve la recherche locale. Ne pas utiliser un cluster partagé sans contrôler rétention et droits d’accès.
+## Optional Qdrant Vector Store
 
-## Docker
+Uploaded documents are indexed in-memory within the Streamlit session by default. To enable persistent remote vector storage:
+
+1. Configure `QDRANT_URL` and `QDRANT_API_KEY` in your `.env`.
+2. Document vectors and passages sent to Qdrant are automatically isolated by `workspace_id`.
+3. If `QDRANT_URL` is unset or unreachable, the system smoothly falls back to local in-memory retrieval.
+
+---
+
+## Docker Deployment
 
 ```bash
+# 1. Copy environment configuration
 cp env.template .env
-# Renseigner OPENROUTER_API_KEY si l’inférence Qwen est souhaitée.
+
+# 2. Build and run containers
 docker compose up --build
 ```
 
-L’interface est disponible sur `http://localhost:8501`, l’API sur `http://localhost:8000/docs`. Le service Qdrant est optionnel et commenté dans `docker-compose.yml`. L’API de ce prototype ne doit pas être exposée publiquement sans contrôle d’accès.
+- Streamlit Web UI: `http://localhost:8501`
+- FastAPI REST API: `http://localhost:8000/docs`
 
-## Limites et passage en production
+---
 
-- Le stockage documentaire est volatile et propre à la session Streamlit ; les PDF importés ne sont pas persistés localement par défaut.
-- Le variant `:free` dépend des limites, du routage et de la disponibilité OpenRouter.
-- Le gold set est synthétique ; créer un benchmark métier avant une utilisation institutionnelle.
-- Le retrieval par feature hashing n’est pas un modèle d’embeddings multilingue entraîné ; envisager BGE-M3/e5, Qdrant et un reranker dédié.
-- Le prototype n’ajoute pas de contrôle d’accès Streamlit, journal d’audit ni base durable multi-utilisateur. Ne pas exposer publiquement des documents sensibles.
-- Aucun fine-tuning n’est effectué. Le contenu PDF est considéré comme une source non fiable et ne peut remplacer les instructions système.
+## Production Considerations & Limitations
 
-## Arborescence
+- **Session Volatility**: In-memory storage is scoped to the Streamlit session; uploaded PDFs are not persisted to disk by default.
+- **API Availability**: The `:free` LLM variants depend on OpenRouter's upstream availability and rate limits.
+- **Evaluation Scope**: The gold evaluation set is synthetic; build a domain-specific evaluation dataset for institutional use.
+- **Feature Hashing**: Feature hashing is designed for lightweight portability. For production semantic search, upgrade to a dedicated dense embedding model (e.g., BGE-M3, multilingual-e5) paired with Qdrant.
+- **Security & Multi-Tenancy**: The prototype uses workspace UUIDs for capacity routing; add authentication (OAuth2/OIDC), rate limiting, and access control policies before public production exposure.
+
+---
+
+## Project Structure
 
 ```text
-app.py                     Interface Streamlit
-api.py                     Endpoints FastAPI/Pydantic
-policyrag/ingestion.py     PDF, OCR, sections et chunking
-policyrag/retrieval.py     BM25 + vecteurs n-grammes + abstention
-policyrag/generation.py    OpenRouter/Qwen et citations
-policyrag/service.py       Orchestration des modes assistant
-policyrag/qdrant_store.py Adaptateur Qdrant distant facultatif
-policyrag/demo.py          Corpus fictif
- tests/                    Tests de l’application et de l’API
-evaluation/                Gold set et métriques retrieval
-research_sources.md        Références au modèle et au quota gratuit
+├── app.py                     # Streamlit web application & user interface
+├── api.py                     # FastAPI REST API endpoints & schemas
+├── policyrag/
+│   ├── ingestion.py           # PDF parsing, OCR fallback, section detection, chunking
+│   ├── retrieval.py           # BM25 + feature hash retrieval, reranking, abstention
+│   ├── generation.py          # OpenRouter LLM client, prompt templates, citation formatting
+│   ├── service.py             # Orchestration service for assistant modes
+│   ├── qdrant_store.py        # Optional remote Qdrant vector database adapter
+│   ├── models.py              # Pydantic data models & typing
+│   └── demo.py                # Synthetic trilingual policy reports
+├── tests/                     # Unit and integration test suite
+├── evaluation/                # Gold evaluation dataset and retrieval metrics
+├── requirements.txt           # Python package dependencies
+├── Dockerfile                 # Multi-stage container definition
+└── docker-compose.yml         # Container orchestration config
 ```

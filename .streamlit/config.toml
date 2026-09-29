@@ -5,7 +5,7 @@ enableCORS = true
 corsAllowedOrigins = [
   "http://localhost:8501",
   "http://127.0.0.1:8501",
-  "https://8501-i32tb19xau387hpg78lm0-82923b8d.us4.manus.computer",
+  "",
 ]
 
 [browser]
